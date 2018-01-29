@@ -46,6 +46,12 @@ coverage.xml
 *.cover
 .hypothesis/
 
+
+*.samples
+*.csv
+*.zip
+
+
 # Translations
 *.mo
 *.pot

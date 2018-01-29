@@ -1,0 +1,4 @@
+embeddings {
+      tensor_name: "EmbedSequence/embeddings"
+      metadata_path: "vocab.vcb"
+}

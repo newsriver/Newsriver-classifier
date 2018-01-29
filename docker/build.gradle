@@ -1,0 +1,37 @@
+apply plugin: 'docker'
+
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'se.transmode.gradle:gradle-docker:1.2'
+    }
+}
+
+
+docker {
+    registry = 'https://docker-registry.newsriver.io:5000'
+
+}
+
+
+task clean() {
+    delete "build"
+}
+
+
+task buildimage(type: Docker, dependsOn: [clean]) {
+    tagVersion = 'latest'
+    registry = 'docker-registry.newsriver.io:5000'
+    applicationName = 'tensorfow'
+    dockerfile = project.file('Dockerfile')
+    push = true
+    doFirst {
+        copy {
+            from './'
+            into "$stageDir/"
+        }
+    }
+}
