@@ -41,10 +41,11 @@ tf.logging.set_verbosity(tf.logging.INFO)
 # variables set by init()
 TRAIN_STEPS = 1000
 EVAL_STEPS = 1000
-BATCH_SIZE =  2000
+BATCH_SIZE =  64
 WORD_VOCAB_FILE = None
 N_WORDS = -1
-CHECKPOINT_STEPS = 200
+CHECKPOINT_STEPS = 1000
+SUMMARY_STEPS = 100
 #Vocabulary
 MIN_WORD_FREQUENCY=10
 
@@ -138,7 +139,6 @@ def load_data_and_labels(dataPath,mode):
     examples_op = tf.contrib.learn.read_batch_examples(
         samplesFiles,
         batch_size=BATCH_SIZE,
-        randomize_input=True,
         reader=tf.TextLineReader,
         num_epochs=None,
         parse_fn=lambda x: tf.decode_csv(x, [tf.constant([''], dtype=tf.string)] * len(HEADERS)))
@@ -162,6 +162,27 @@ def load_data_and_labels(dataPath,mode):
 
 
 def cnn_model(features, target, mode):
+
+
+    embedding_dim = 64  # 词向量维度
+    seq_length = 600  # 序列长度
+    num_filters = 256  # 卷积核数目
+    kernel_size = 5  # 卷积核尺寸
+    vocab_size = 5000  # 词汇表达小
+
+    hidden_dim = 128  # 全连接层神经元
+
+    dropout_keep_prob = 0.5  # dropout保留比例
+    learning_rate = 1e-3  # 学习率
+
+    batch_size = 64  # 每批训练大小
+    num_epochs = 10  # 总迭代轮次
+
+    print_per_batch = 100  # 每多少轮输出一次结果
+    save_per_batch = 10  # 每多少轮存入tensorboard
+
+
+
     table = lookup.index_table_from_file(vocabulary_file=WORD_VOCAB_FILE, num_oov_buckets=1, default_value=-1)
 
     features = features['text']
@@ -176,20 +197,26 @@ def cnn_model(features, target, mode):
     #logger.info('text={}'.format(sliced.eval()))
     #logger.info('target={}'.format(target.eval()))
 
-    # layer to take the words and convert them into vectors (embeddings)
-    embeds = tf.contrib.layers.embed_sequence(sliced, vocab_size=N_WORDS, embed_dim=EMBEDDING_SIZE)
 
+    with tf.device('/cpu:0'):
+            embedding = tf.get_variable('embedding', [N_WORDS, EMBEDDING_SIZE])
+            embedding_inputs = tf.nn.embedding_lookup(embedding, sliced)
 
+    with tf.name_scope("cnn"):
+            # CNN layer
+            conv = tf.layers.conv1d(embedding_inputs, num_filters, kernel_size, name='conv')
+            # global max pooling layer
+            gmp = tf.reduce_max(conv, reduction_indices=[1], name='gmp')
 
-    # now do convolution
-    conv = tf.contrib.layers.conv2d(embeds, 1, WINDOW_SIZE, stride=STRIDE, padding='SAME') # (?, 4, 1)
-    conv = tf.nn.relu(conv) # (?, 4, 1)
-    words = tf.squeeze(conv, [2]) # (?, 4)
+    with tf.name_scope("score"):
+            # 全连接层，后面接dropout以及relu激活
+            fc = tf.layers.dense(gmp, hidden_dim, name='fc1')
+            fc = tf.contrib.layers.dropout(fc, dropout_keep_prob)
+            fc = tf.nn.relu(fc)
 
+            # 分类器
+            logits = tf.layers.dense(fc, len(TARGETS), name='fc2')
 
-    n_classes = len(TARGETS)
-
-    logits = tf.contrib.layers.fully_connected(words, n_classes, activation_fn=None)
 
     predictions_dict = {
       'source': tf.gather(TARGETS, tf.argmax(logits, 1)),
@@ -252,7 +279,7 @@ def experiment_fn(output_dir):
     #logging_hook = tf.train.LoggingTensorHook({"accuracy" : tflearn.MetricSpec(metric_fn=metrics.streaming_accuracy, prediction_key='class')}, every_n_iter=10)
 
     return tflearn.Experiment(
-        tflearn.Estimator(model_fn=cnn_model, model_dir=output_dir,config=tf.contrib.learn.RunConfig(save_checkpoints_steps=CHECKPOINT_STEPS,save_checkpoints_secs=None,save_summary_steps=100)),
+        tflearn.Estimator(model_fn=cnn_model, model_dir=output_dir,config=tf.contrib.learn.RunConfig(save_checkpoints_steps=CHECKPOINT_STEPS,save_checkpoints_secs=None,save_summary_steps=SUMMARY_STEPS)),
         train_input_fn=get_train(),
         eval_input_fn=get_valid(),
         eval_metrics={
