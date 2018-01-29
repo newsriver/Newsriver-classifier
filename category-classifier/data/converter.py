@@ -62,7 +62,17 @@ def load_data_and_labels():
 
     return [allSamples, allLabels]
 
+
 texts,labels = load_data_and_labels()
+
+random_seed = np.arange(labels.shape[0])
+np.random.shuffle(random_seed)
+
+rd_texts=texts[random_seed]
+rd_labels=labels[random_seed]
+
+
+
 with open('training.csv', 'w') as f_t:
     with open('eval.csv', 'w') as f_e:
         writer_training = csv.writer(f_t,delimiter=',', quoting=csv.QUOTE_NONNUMERIC)
@@ -70,6 +80,6 @@ with open('training.csv', 'w') as f_t:
 
         for i in range(0, len(texts)):
             if i%5==0:
-                writer_eval.writerow([int(labels[i].split(".")[0]),labels[i].split(".")[1],texts[i]])
+                writer_eval.writerow([int(rd_labels[i].split(".")[0]),rd_labels[i].split(".")[1],rd_texts[i]])
             else:
-                writer_training.writerow([int(labels[i].split(".")[0]),labels[i].split(".")[1],texts[i]])
+                writer_training.writerow([int(rd_labels[i].split(".")[0]),rd_labels[i].split(".")[1],rd_texts[i]])
