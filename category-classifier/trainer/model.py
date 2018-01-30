@@ -20,6 +20,15 @@
 #http://www.wildml.com/2015/12/implementing-a-cnn-for-text-classification-in-tensorflow/
 #https://github.com/gaussic/text-classification-cnn-rnn/blob/master/cnn_model.py
 
+#Orginal model
+#https://github.com/dennybritz/cnn-text-classification-tf
+
+# Nice example  -uses Experiment and custom hookcs
+#https://github.com/DongjunLee/text-cnn-tensorflow
+
+#Cool blog post with very high streaming_accuracy
+#https://www.google.com/search?q=tensorflow+cnn+text&pws=0&gl=us&source=lnt&tbs=qdr:y&sa=X&ved=0ahUKEwiF6JKJ-v_YAhUEblAKHW64A0YQpwUIHw&biw=1611&bih=930
+
 
 from __future__ import absolute_import
 from __future__ import division
@@ -31,6 +40,7 @@ import tensorflow.contrib.layers as tflayers
 from tensorflow.contrib.learn.python.learn import learn_runner
 import tensorflow.contrib.metrics as metrics
 from tensorflow.python.platform import gfile
+from tensorflow.python.lib.io import file_io
 from tensorflow.contrib import lookup
 import logging
 import sys
@@ -46,15 +56,21 @@ WORD_VOCAB_FILE = None
 N_WORDS = -1
 CHECKPOINT_STEPS = 1000
 SUMMARY_STEPS = 100
+
+
+
 #Vocabulary
-MIN_WORD_FREQUENCY=10
+MIN_WORD_FREQUENCY=8
 
 
 # CNN model parameters
-EMBEDDING_SIZE = 24
-WINDOW_SIZE = EMBEDDING_SIZE
-STRIDE = int(WINDOW_SIZE/2)
+EMBEDDING_SIZE = 64
+KERNEL_SIZE = 8
+FILTERS = 256
+HIDDEN_DIM = 256
+DROPOUT_KEEP_PROB = 0.5
 
+LEARNING_RATE = 0.001 #0.01
 
 # describe your data
 #TARGETS = ['International','Business','Technology','Entertainment','Sports','United Kingdom','Politics','USA']
@@ -62,11 +78,13 @@ STRIDE = int(WINDOW_SIZE/2)
 TARGETS = ['Business','Technology']
 
 
-MAX_DOCUMENT_LENGTH = 500
+MAX_DOCUMENT_LENGTH = 1500
 PADWORD = '[-PAD-]'
 
 DATA_PATH = None
 logger = None
+
+vocab_processor = tflearn.preprocessing.VocabularyProcessor(MAX_DOCUMENT_LENGTH, min_frequency=MIN_WORD_FREQUENCY)
 
 def init(dataPath, outputPath, num_steps,eval_steps):
   global TRAIN_STEPS,EVAL_STEPS, WORD_VOCAB_FILE, N_WORDS,logger,DATA_PATH
@@ -84,23 +102,26 @@ def init(dataPath, outputPath, num_steps,eval_steps):
 
   texts,labels = load_data_and_labels(DATA_PATH,'training')
 
-  N_WORDS = save_vocab(texts, WORD_VOCAB_FILE);
+  N_WORDS = save_vocab(dataPath, WORD_VOCAB_FILE);
   #N_WORDS = save_vocab('gs://{}/txtcls1/train.csv'.format(BUCKET), 'title', WORD_VOCAB_FILE);
 
 
 
-def save_vocab(path, outfilename):
-
+def save_vocab(dataPath, outfilename):
+    global vocab_processor
     logger.info('Loading text entries for vocabulary...')
 
     #from numpy import genfromtxt
     #my_data = genfromtxt('/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/training.csv', delimiter=',')
-
-    with open('/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/training.csv', 'r') as csvfile:
-        samples = [line[2] for line in csv.reader(csvfile, quoting=csv.QUOTE_NONNUMERIC)]
+    samplesFiles =subprocess.check_output(['gsutil', 'ls', '{}/*training.csv'.format(dataPath)]).decode("utf-8").splitlines()
+    logger.info('Loadinf files for vocabulary: {}'.format(samplesFiles))
+    samples = []
+    for file in samplesFiles:
+        with file_io.FileIO(file, 'r') as csvfile:
+            file_samples = [line[2] for line in csv.reader(csvfile, quoting=csv.QUOTE_NONNUMERIC)]
+        samples = samples + file_samples;
 
     logger.info('Building vocabolary...')
-    vocab_processor = tflearn.preprocessing.VocabularyProcessor(MAX_DOCUMENT_LENGTH, min_frequency=MIN_WORD_FREQUENCY)
     vocab_processor.fit(samples)
 
 
@@ -119,13 +140,14 @@ def load_data_and_labels(dataPath,mode):
     from tensorflow.python.lib.io import file_io
     import os
     # Load data from files
-    #samplesFiles =subprocess.check_output(['gsutil', 'ls', '{}/{}*.csv'.format(dataPath,mode)]).splitlines()
+    samplesFiles =subprocess.check_output(['gsutil', 'ls', '{}/{}*.csv'.format(dataPath,mode)]).decode("utf-8").splitlines()
     #samplesFiles=['gs://newsriver-category-classifier/data/2.Business-short.samples','gs://newsriver-category-classifier/data/3.Technology-short.samples']
     #samplesFiles=['gs://newsriver-category-classifier/data/2.Business.samples','gs://newsriver-category-classifier/data/3.Technology.samples','gs://newsriver-category-classifier/data/0.International.samples','gs://newsriver-category-classifier/data/5.Sports.samples','gs://newsriver-category-classifier/data/4.Entertainment.samples','gs://newsriver-category-classifier/data/18.United Kingdom.samples','gs://newsriver-category-classifier/data/21.Politics.samples','gs://newsriver-category-classifier/data/49.USA.samples']
-    if mode == 'training':
-        samplesFiles=['/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/training.csv'];
-    else:
-        samplesFiles=['/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/eval.csv'];
+    #if mode == 'training':
+    #    samplesFiles=['/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/training.csv'];
+    #else:
+    #    samplesFiles=['/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/eval.csv'];
+
 
     index=0
     allLabels=[];
@@ -134,7 +156,7 @@ def load_data_and_labels(dataPath,mode):
     HEADERS = ['id','category','text']
 
 
-    logger.info('Loadinf files: {}'.format(samplesFiles))
+    logger.info('Loadinf files for {}: {}'.format(mode,samplesFiles))
 
     examples_op = tf.contrib.learn.read_batch_examples(
         samplesFiles,
@@ -158,30 +180,10 @@ def load_data_and_labels(dataPath,mode):
     return feature_cols, labels
 
 
-
+tf.contrib.learn.preprocessing.VocabularyProcessor
 
 
 def cnn_model(features, target, mode):
-
-
-    embedding_dim = 64  # 词向量维度
-    seq_length = 600  # 序列长度
-    num_filters = 256  # 卷积核数目
-    kernel_size = 5  # 卷积核尺寸
-    vocab_size = 5000  # 词汇表达小
-
-    hidden_dim = 128  # 全连接层神经元
-
-    dropout_keep_prob = 0.5  # dropout保留比例
-    learning_rate = 1e-3  # 学习率
-
-    batch_size = 64  # 每批训练大小
-    num_epochs = 10  # 总迭代轮次
-
-    print_per_batch = 100  # 每多少轮输出一次结果
-    save_per_batch = 10  # 每多少轮存入tensorboard
-
-
 
     table = lookup.index_table_from_file(vocabulary_file=WORD_VOCAB_FILE, num_oov_buckets=1, default_value=-1)
 
@@ -191,8 +193,7 @@ def cnn_model(features, target, mode):
     words = tf.string_split(features)
     densewords = tf.sparse_tensor_to_dense(words, default_value=PADWORD)
     numbers = table.lookup(densewords)
-    padding = tf.constant([[0,0],[0,MAX_DOCUMENT_LENGTH]])
-    padded = tf.pad(numbers, padding)
+    padded = tf.pad(numbers, tf.constant([[0,0],[0,MAX_DOCUMENT_LENGTH]]))
     sliced = tf.slice(padded, [0,0], [-1, MAX_DOCUMENT_LENGTH])
     #logger.info('text={}'.format(sliced.eval()))
     #logger.info('target={}'.format(target.eval()))
@@ -204,14 +205,13 @@ def cnn_model(features, target, mode):
 
     with tf.name_scope("cnn"):
             # CNN layer
-            conv = tf.layers.conv1d(embedding_inputs, num_filters, kernel_size, name='conv')
+            conv = tf.layers.conv1d(embedding_inputs, FILTERS, KERNEL_SIZE, name='conv')
             # global max pooling layer
             gmp = tf.reduce_max(conv, reduction_indices=[1], name='gmp')
 
     with tf.name_scope("score"):
-            # 全连接层，后面接dropout以及relu激活
-            fc = tf.layers.dense(gmp, hidden_dim, name='fc1')
-            fc = tf.contrib.layers.dropout(fc, dropout_keep_prob)
+            fc = tf.layers.dense(gmp, HIDDEN_DIM, name='fc1')
+            fc = tf.contrib.layers.dropout(fc, DROPOUT_KEEP_PROB)
             fc = tf.nn.relu(fc)
 
             # 分类器
@@ -230,7 +230,7 @@ def cnn_model(features, target, mode):
          loss,
          tf.train.get_global_step(),
          optimizer='Adam',
-         learning_rate=0.01)
+         learning_rate=LEARNING_RATE)
     else:
        loss = None
        train_op = None
