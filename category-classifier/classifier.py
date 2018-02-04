@@ -38,7 +38,7 @@ class Consumer(threading.Thread):
 
         # Evaluation
         # ==================================================
-        checkpoint_file = tf.train.latest_checkpoint("./outputdir/checkpoints")
+        checkpoint_file = tf.train.latest_checkpoint("./model/checkpoints")
         graph = tf.Graph()
         with graph.as_default():
             session_conf = tf.ConfigProto(

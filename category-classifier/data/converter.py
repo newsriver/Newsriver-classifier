@@ -10,6 +10,9 @@ import logging
 import sys
 import subprocess
 import csv
+import glob
+
+
 
 logger = logging.getLogger('Converter')
 
@@ -18,20 +21,36 @@ def clean_str(string):
     Tokenization/string cleaning for all datasets except for SST.
     Original taken from https://github.com/yoonkim/CNN_sentence/blob/master/process_data.py
     """
-    string = re.sub(r"[^A-Za-z0-9(),!?\'\`]", " ", string)
-    string = re.sub(r"\'s", " \'s", string)
-    string = re.sub(r"\'ve", " \'ve", string)
-    string = re.sub(r"n\'t", " n\'t", string)
-    string = re.sub(r"\'re", " \'re", string)
-    string = re.sub(r"\'d", " \'d", string)
-    string = re.sub(r"\'ll", " \'ll", string)
-    string = re.sub(r",", " , ", string)
-    string = re.sub(r"!", " ! ", string)
-    string = re.sub(r"\(", " \( ", string)
-    string = re.sub(r"\)", " \) ", string)
-    string = re.sub(r"\?", " \? ", string)
+    string = re.sub(r"[^A-Za-z0-9()]", " ", string)
+
+    #string = re.sub(r"\'s", " \'s", string)
+    #string = re.sub(r"\'ve", " \'ve", string)
+    #string = re.sub(r"n\'t", " n\'t", string)
+    #string = re.sub(r"\'re", " \'re", string)
+    #string = re.sub(r"\'d", " \'d", string)
+    #string = re.sub(r"\'ll", " \'ll", string)
+    #string = re.sub(r",", " , ", string)
+    #string = re.sub(r"!", " ! ", string)
+    #string = re.sub(r"\(", " \( ", string)
+    #string = re.sub(r"\)", " \) ", string)
+    #string = re.sub(r"\?", " \? ", string)
     string = re.sub(r"\s{2,}", " ", string)
-    return string.strip().lower()
+
+
+    """
+    Instead of reducing the sentences to a list of tokens (>=3 chars) we could sonsider to keep
+    the sencence structure (see commented experssion above) and even avoid to lowe case all chars
+    """
+
+    string = string.strip().lower()
+
+    sentence = ""
+    words = string.split(" ")
+    for word in words:
+        if len(word) >= 3:
+            sentence += word + " "
+
+    return sentence.strip()
 
 
 def load_data_and_labels():
@@ -43,7 +62,18 @@ def load_data_and_labels():
     #samplesFiles=['gs://newsriver-category-classifier/data/2.Business.samples']
     #samplesFiles=['gs://newsriver-category-classifier/data/2.Business.samples','gs://newsriver-category-classifier/data/3.Technology.samples','gs://newsriver-category-classifier/data/0.International.samples','gs://newsriver-category-classifier/data/5.Sports.samples','gs://newsriver-category-classifier/data/4.Entertainment.samples','gs://newsriver-category-classifier/data/18.United Kingdom.samples','gs://newsriver-category-classifier/data/21.Politics.samples','gs://newsriver-category-classifier/data/49.USA.samples']
 
-    samplesFiles=['/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/2.Business.samples','/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/3.Technology.samples']
+    samplesFiles=['/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/2.Business.samples',
+                  '/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/3.Technology.samples',
+                  '/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/4.Entertainment.samples',
+                  '/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/0.International.samples',
+                  '/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/18.United Kingdom.samples',
+                  '/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/21.Politics.samples',
+                  '/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/49.USA.samples',
+                  '/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/5.Sports.samples']
+
+    language = "en"
+
+    samplesFiles = glob.glob('{}/{}.*.csv'.format(".",language))
 
     allLabels=[];
     allSamples = [];
@@ -73,8 +103,8 @@ rd_labels=labels[random_seed]
 
 
 
-with open('training.csv', 'w') as f_t:
-    with open('eval.csv', 'w') as f_e:
+with open('{}.training.csv'.format(language), 'w',encoding='utf8') as f_t:
+    with open('{}.eval.csv'.format(language), 'w',encoding='utf8') as f_e:
         writer_training = csv.writer(f_t,delimiter=',', quoting=csv.QUOTE_NONNUMERIC)
         writer_eval = csv.writer(f_e,delimiter=',', quoting=csv.QUOTE_NONNUMERIC)
 

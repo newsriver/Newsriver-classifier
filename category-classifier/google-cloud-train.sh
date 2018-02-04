@@ -16,13 +16,13 @@ gcloud ml-engine jobs submit training $JOB_NAME \
 --module-name trainer.task \
 --package-path trainer/ \
 --region europe-west1 \
---scale-tier BASIC \
+--scale-tier BASIC_GPU \
 --config config.yaml \
 -- \
 --dataPath=gs://$BUCKET/data \
 --output_dir=$OUTPUT_PATH \
 --eval_steps 100 \
---train_steps 5000
+--train_steps 20000
 fi
 
 

@@ -46,6 +46,10 @@ import logging
 import sys
 import subprocess
 import csv
+import glob
+
+np.set_printoptions(threshold=np.nan)
+
 tf.logging.set_verbosity(tf.logging.INFO)
 
 # variables set by init()
@@ -60,25 +64,31 @@ SUMMARY_STEPS = 100
 
 
 #Vocabulary
-MIN_WORD_FREQUENCY=8
+MIN_WORD_FREQUENCY=10
 
 
 # CNN model parameters
-EMBEDDING_SIZE = 64
-KERNEL_SIZE = 8
-FILTERS = 256
-HIDDEN_DIM = 256
+EMBEDDING_SIZE = 20
+NUM_FILTERS = 20
+FILTER_SIZES=[5]
+
+#EMBEDDING_SIZE = 128
+#NUM_FILTERS = 128
+#FILTER_SIZES=[4,5,6]
+
 DROPOUT_KEEP_PROB = 0.5
 
 LEARNING_RATE = 0.001 #0.01
 
 # describe your data
 #TARGETS = ['International','Business','Technology','Entertainment','Sports','United Kingdom','Politics','USA']
+#TARGETS = ['Business','Technology','Sports','Entertainment','International','United Kingdom','Politics','USA']
+#TARGETS = ['Business','Sports']
+TARGETS = ['International','Business','Technology','Sports','Entertainment','Italy','Culture','Swiss','TV & Movies','Wine & Dine','Life','Motors','Science','Photography','Health']
+LANGUAGE = "it"
+NUM_CLASSES = len(TARGETS)
 
-TARGETS = ['Business','Technology']
-
-
-MAX_DOCUMENT_LENGTH = 1500
+MAX_DOCUMENT_LENGTH = 400
 PADWORD = '[-PAD-]'
 
 DATA_PATH = None
@@ -113,7 +123,12 @@ def save_vocab(dataPath, outfilename):
 
     #from numpy import genfromtxt
     #my_data = genfromtxt('/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/training.csv', delimiter=',')
-    samplesFiles =subprocess.check_output(['gsutil', 'ls', '{}/*training.csv'.format(dataPath)]).decode("utf-8").splitlines()
+
+    if "gs://" not in dataPath:
+        samplesFiles = glob.glob('{}/Training-set.{}.csv'.format(dataPath,LANGUAGE))
+    else:
+        samplesFiles =subprocess.check_output(['gsutil', 'ls', '{}/Training-set.{}.csv'.format(dataPath,LANGUAGE)]).decode("utf-8").splitlines()
+
     logger.info('Loadinf files for vocabulary: {}'.format(samplesFiles))
     samples = []
     for file in samplesFiles:
@@ -140,7 +155,17 @@ def load_data_and_labels(dataPath,mode):
     from tensorflow.python.lib.io import file_io
     import os
     # Load data from files
-    samplesFiles =subprocess.check_output(['gsutil', 'ls', '{}/{}*.csv'.format(dataPath,mode)]).decode("utf-8").splitlines()
+
+    if mode == 'training':
+        prefix = "Training"
+    else:
+        prefix = "Evaluation"
+
+    if "gs://" not in dataPath:
+        samplesFiles = glob.glob('{}/{}-set.{}.csv'.format(dataPath,prefix,LANGUAGE))
+    else:
+        samplesFiles =subprocess.check_output(['gsutil', 'ls', '{}/{}-set.{}.csv'.format(dataPath,mode,LANGUAGE)]).decode("utf-8").splitlines()
+
     #samplesFiles=['gs://newsriver-category-classifier/data/2.Business-short.samples','gs://newsriver-category-classifier/data/3.Technology-short.samples']
     #samplesFiles=['gs://newsriver-category-classifier/data/2.Business.samples','gs://newsriver-category-classifier/data/3.Technology.samples','gs://newsriver-category-classifier/data/0.International.samples','gs://newsriver-category-classifier/data/5.Sports.samples','gs://newsriver-category-classifier/data/4.Entertainment.samples','gs://newsriver-category-classifier/data/18.United Kingdom.samples','gs://newsriver-category-classifier/data/21.Politics.samples','gs://newsriver-category-classifier/data/49.USA.samples']
     #if mode == 'training':
@@ -149,12 +174,7 @@ def load_data_and_labels(dataPath,mode):
     #    samplesFiles=['/Users/eliapalme/Newsriver/Newsriver-classifier/category-classifier/data/eval.csv'];
 
 
-    index=0
-    allLabels=[];
-    allSamples = [];
-
-    HEADERS = ['id','category','text']
-
+    HEADERS = ['language','category','text','title','url','country']
 
     logger.info('Loadinf files for {}: {}'.format(mode,samplesFiles))
 
@@ -169,53 +189,91 @@ def load_data_and_labels(dataPath,mode):
     for i, header in enumerate(HEADERS):
         examples_dict[header] = examples_op[:, i]
 
-    feature_cols = {'text': examples_dict['text']}
-    #feature_cols.update({'text': dense_to_sparse( examples_dict['text'])})
+    text_tokens = tf.string_split(examples_dict['text'],delimiter=" ")
+    text_tokens = tf.sparse_tensor_to_dense(text_tokens, default_value=PADWORD)
 
-    table = tf.contrib.lookup.index_table_from_tensor(mapping=tf.constant(TARGETS), num_oov_buckets=0, default_value=-1)
+    feature_cols = {'text': text_tokens}
 
-    labels = table.lookup(examples_dict['category'])
-    #label= tf.string_to_number(examples_dict['id'], out_type=tf.int32)
+    class_table = tf.contrib.lookup.index_table_from_tensor(mapping=tf.constant(TARGETS), num_oov_buckets=0, default_value=-1)
+    classes = class_table.lookup(examples_dict['category'])
 
-    return feature_cols, labels
-
-
-tf.contrib.learn.preprocessing.VocabularyProcessor
+    return feature_cols, classes
 
 
-def cnn_model(features, target, mode):
 
-    table = lookup.index_table_from_file(vocabulary_file=WORD_VOCAB_FILE, num_oov_buckets=1, default_value=-1)
 
-    features = features['text']
-    # string operations
+def cnn_model(features, classes, mode):
+
+    vocab_table = lookup.index_table_from_file(vocabulary_file=WORD_VOCAB_FILE, num_oov_buckets=1, default_value=-1)
+
+
     logger.info('mode={}'.format(mode))
-    words = tf.string_split(features)
-    densewords = tf.sparse_tensor_to_dense(words, default_value=PADWORD)
-    numbers = table.lookup(densewords)
-    padded = tf.pad(numbers, tf.constant([[0,0],[0,MAX_DOCUMENT_LENGTH]]))
-    sliced = tf.slice(padded, [0,0], [-1, MAX_DOCUMENT_LENGTH])
-    #logger.info('text={}'.format(sliced.eval()))
-    #logger.info('target={}'.format(target.eval()))
 
+    text_tokens = features['text']
 
-    with tf.device('/cpu:0'):
+    text_ids = vocab_table.lookup(text_tokens)
+    text_ids_padded = tf.pad(text_ids, tf.constant([[0,0],[0,MAX_DOCUMENT_LENGTH]]))
+    text_ids_padded = tf.slice(text_ids_padded, [0,0], [-1, MAX_DOCUMENT_LENGTH])
+
+     # Keeping track of l2 regularization loss (optional)
+    l2_loss = tf.constant(0.0)
+
+    # Embedding layer
+    with tf.device('/cpu:0'), tf.name_scope("embedding"):
             embedding = tf.get_variable('embedding', [N_WORDS, EMBEDDING_SIZE])
-            embedding_inputs = tf.nn.embedding_lookup(embedding, sliced)
+            embedding_inputs = tf.nn.embedding_lookup(embedding, text_ids_padded)
+            embedded_chars_expanded = tf.expand_dims(embedding_inputs, -1)
 
-    with tf.name_scope("cnn"):
-            # CNN layer
-            conv = tf.layers.conv1d(embedding_inputs, FILTERS, KERNEL_SIZE, name='conv')
-            # global max pooling layer
-            gmp = tf.reduce_max(conv, reduction_indices=[1], name='gmp')
+    # Create a convolution + maxpool layer for each filter size
+    pooled_outputs = []
+    for i, filter_size in enumerate(FILTER_SIZES):
+        with tf.name_scope("conv-maxpool-%s" % filter_size):
+            # Convolution Layer
+            filter_shape = [filter_size, EMBEDDING_SIZE, 1, NUM_FILTERS]
+            W = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), name="W")
+            b = tf.Variable(tf.constant(0.1, shape=[NUM_FILTERS]), name="b")
+            conv = tf.nn.conv2d(
+                embedded_chars_expanded,
+                W,
+                strides=[1, 1, 1, 1],
+                padding="VALID",
+                name="conv")
+            # Apply nonlinearity
+            h = tf.nn.relu(tf.nn.bias_add(conv, b), name="relu")
+            # Maxpooling over the outputs
+            pooled = tf.nn.max_pool(
+                h,
+                ksize=[1, MAX_DOCUMENT_LENGTH - filter_size + 1, 1, 1],
+                strides=[1, 1, 1, 1],
+                padding='VALID',
+                name="pool")
+            pooled_outputs.append(pooled)
 
-    with tf.name_scope("score"):
-            fc = tf.layers.dense(gmp, HIDDEN_DIM, name='fc1')
-            fc = tf.contrib.layers.dropout(fc, DROPOUT_KEEP_PROB)
-            fc = tf.nn.relu(fc)
+    # Combine all the pooled features
+    num_filters_total = NUM_FILTERS * len(FILTER_SIZES)
+    h_pool = tf.concat(pooled_outputs, 3)
+    h_pool_flat = tf.reshape(h_pool, [-1, num_filters_total])
 
-            # 分类器
-            logits = tf.layers.dense(fc, len(TARGETS), name='fc2')
+    # Add dropout
+    with tf.name_scope("dropout"):
+        h_drop = tf.nn.dropout(h_pool_flat, DROPOUT_KEEP_PROB)
+
+    # Final (unnormalized) scores and predictions
+    with tf.name_scope("output"):
+        W = tf.get_variable(
+            "W",
+            shape=[num_filters_total, NUM_CLASSES],
+            initializer=tf.contrib.layers.xavier_initializer())
+        b = tf.Variable(tf.constant(0.1, shape=[NUM_CLASSES]), name="b")
+        l2_loss += tf.nn.l2_loss(W)
+        l2_loss += tf.nn.l2_loss(b)
+        logits = tf.nn.xw_plus_b(h_drop, W, b, name="scores")
+        predictions = tf.argmax(logits, 1, name="predictions")
+
+    # Accuracy
+    #with tf.name_scope("accuracy"):
+    #    correct_predictions = tf.equal(predictions, tf.argmax(target, 1))
+    #    accuracy = tf.reduce_mean(tf.cast(correct_predictions, "float"), name="accuracy")
 
 
     predictions_dict = {
@@ -225,7 +283,7 @@ def cnn_model(features, target, mode):
     }
 
     if mode == tf.contrib.learn.ModeKeys.TRAIN or mode == tf.contrib.learn.ModeKeys.EVAL:
-       loss = tf.losses.sparse_softmax_cross_entropy(target, logits)
+       loss = tf.losses.sparse_softmax_cross_entropy(classes, logits)
        train_op = tf.contrib.layers.optimize_loss(
          loss,
          tf.train.get_global_step(),
@@ -244,7 +302,7 @@ def cnn_model(features, target, mode):
 
 def serving_input_fn():
     feature_placeholders = {
-      'text': tf.placeholder(tf.string, [None]),
+      'text': tf.placeholder(tf.string, shape=[None,None]),
     }
     features = feature_placeholders
     return tflearn.utils.input_fn_utils.InputFnOps(
